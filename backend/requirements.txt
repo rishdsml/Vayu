@@ -1,0 +1,11 @@
+psycopg2-binary
+python-dotenv
+openai
+alembic
+fastapi
+uvicorn
+anthropic
+sqlalchemy<2.1
+google-auth-oauthlib
+google-ads
+cryptography

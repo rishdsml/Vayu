@@ -1,0 +1,26 @@
+{
+  "campaign": {
+    "campaign_trend": {
+      "name": "Campaign Daily Performance — Trend",
+      "description": "One row per campaign per day. Use for spotting day-over-day changes in spend, CPA or conversions.",
+      "query": "SELECT campaign_id, campaign_name, date, impressions, clicks, cost, conversions, conversion_value, ctr, cpc, cvr, cpa, roas FROM campaigns_daily WHERE date BETWEEN %(start_date)s AND %(end_date)s ORDER BY campaign_id, date"
+    },
+    "campaign_comparison": {
+      "name": "Campaign Period Performance — Comparison",
+      "description": "One aggregated row per campaign for the period. Use for ranking campaigns by spend or CPA.",
+      "query": "SELECT campaign_id, campaign_name, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(cost) AS cost, SUM(conversions) AS conversions, SUM(conversion_value) AS conversion_value, SUM(clicks)::numeric / NULLIF(SUM(impressions), 0) AS ctr, SUM(cost) / NULLIF(SUM(clicks), 0) AS cpc, SUM(conversions) / NULLIF(SUM(clicks), 0) AS cvr, SUM(cost) / NULLIF(SUM(conversions), 0) AS cpa, SUM(conversion_value) / NULLIF(SUM(cost), 0) AS roas FROM campaigns_daily WHERE date BETWEEN %(start_date)s AND %(end_date)s GROUP BY campaign_id, campaign_name ORDER BY cost DESC"
+    }
+  },
+  "ad_group": {
+    "ad_group_trend": {
+      "name": "Ad Group Daily Performance — Trend",
+      "description": "One row per ad group per day. Use for spotting which ad group drove a campaign-level change.",
+      "query": "SELECT campaign_id, ad_group_id, ad_group_name, date, impressions, clicks, cost, conversions, conversion_value, all_conversions, all_conversion_value, ctr, cpc, cvr, cpa, roas, search_impression_share, search_rank_lost_is FROM ad_groups_daily WHERE date BETWEEN %(start_date)s AND %(end_date)s ORDER BY campaign_id, ad_group_id, date"
+    },
+    "ad_group_comparison": {
+      "name": "Ad Group Period Performance — Comparison",
+      "description": "One aggregated row per ad group for the period. Use for ranking ad groups by spend or CPA within a campaign.",
+      "query": "SELECT campaign_id, ad_group_id, ad_group_name, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(cost) AS cost, SUM(conversions) AS conversions, SUM(conversion_value) AS conversion_value, SUM(all_conversions) AS all_conversions, SUM(all_conversion_value) AS all_conversion_value, SUM(clicks)::numeric / NULLIF(SUM(impressions), 0) AS ctr, SUM(cost) / NULLIF(SUM(clicks), 0) AS cpc, SUM(conversions) / NULLIF(SUM(clicks), 0) AS cvr, SUM(cost) / NULLIF(SUM(conversions), 0) AS cpa, SUM(conversion_value) / NULLIF(SUM(cost), 0) AS roas FROM ad_groups_daily WHERE date BETWEEN %(start_date)s AND %(end_date)s GROUP BY campaign_id, ad_group_id, ad_group_name ORDER BY cost DESC"
+    }
+  }
+}

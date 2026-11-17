@@ -1,0 +1,108 @@
+{
+  "campaign": {
+    "campaign_measurement_trend": {
+      "name": "Campaign Conversion Measurement Trend",
+      "lever": "Measurement",
+      "description": "One row per campaign per day. Shows conversions, all_conversions, the secondary gap, CVR, CPA, ROAS and a flag for days with clicks but zero conversions.",
+      "query": "SELECT campaign_id, campaign_name, date, impressions, clicks, cost, conversions, all_conversions, conversion_value, all_conversions_value, all_conversions - conversions AS secondary_gap, conversions / NULLIF(clicks, 0) AS cvr, cost / NULLIF(conversions, 0) AS cpa, conversion_value / NULLIF(cost, 0) AS roas, (clicks > 0 AND conversions = 0) AS clicks_without_conversions FROM campaigns_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s ORDER BY campaign_id, date"
+    },
+    "campaign_measurement_comparison": {
+      "name": "Campaign Conversion Measurement Comparison",
+      "lever": "Measurement",
+      "description": "One row per campaign comparing the selected period with the previous period of equal length. Shows cost, clicks, conversions, all_conversions, conversion value, CVR and CPA for both periods.",
+      "query": "WITH p AS (SELECT %(start_date)s::date AS s, %(end_date)s::date AS e), w AS (SELECT s, e, s - (e - s + 1) AS ps FROM p) SELECT c.campaign_id, c.campaign_name, SUM(c.cost) FILTER (WHERE c.date >= w.s) AS cost_now, SUM(c.cost) FILTER (WHERE c.date < w.s) AS cost_before, SUM(c.clicks) FILTER (WHERE c.date >= w.s) AS clicks_now, SUM(c.clicks) FILTER (WHERE c.date < w.s) AS clicks_before, SUM(c.conversions) FILTER (WHERE c.date >= w.s) AS conversions_now, SUM(c.conversions) FILTER (WHERE c.date < w.s) AS conversions_before, SUM(c.all_conversions) FILTER (WHERE c.date >= w.s) AS all_conversions_now, SUM(c.all_conversions) FILTER (WHERE c.date < w.s) AS all_conversions_before, SUM(c.conversion_value) FILTER (WHERE c.date >= w.s) AS conversion_value_now, SUM(c.conversion_value) FILTER (WHERE c.date < w.s) AS conversion_value_before, SUM(c.conversions) FILTER (WHERE c.date >= w.s) / NULLIF(SUM(c.clicks) FILTER (WHERE c.date >= w.s), 0) AS cvr_now, SUM(c.conversions) FILTER (WHERE c.date < w.s) / NULLIF(SUM(c.clicks) FILTER (WHERE c.date < w.s), 0) AS cvr_before, SUM(c.cost) FILTER (WHERE c.date >= w.s) / NULLIF(SUM(c.conversions) FILTER (WHERE c.date >= w.s), 0) AS cpa_now, SUM(c.cost) FILTER (WHERE c.date < w.s) / NULLIF(SUM(c.conversions) FILTER (WHERE c.date < w.s), 0) AS cpa_before FROM campaigns_daily c CROSS JOIN w WHERE c.client_id = %(client_id)s AND c.date BETWEEN w.ps AND w.e GROUP BY c.campaign_id, c.campaign_name ORDER BY cost_now DESC NULLS LAST"
+    },
+    "conversion_action_mix": {
+      "name": "Conversion Action Mix (account level)",
+      "lever": "Measurement",
+      "description": "One row per conversion action for the period: category, PRIMARY or SECONDARY, status, conversions, all_conversions and share of total conversions. Account level, not split by campaign.",
+      "query": "SELECT conversion_action_id, conversion_action_name, conversion_category, action_optimization, status, SUM(conversions) AS conversions, SUM(all_conversions) AS all_conversions, SUM(conversion_value) AS conversion_value, SUM(conversions) / NULLIF(SUM(SUM(conversions)) OVER (), 0) AS share_of_conversions FROM conversions WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s GROUP BY conversion_action_id, conversion_action_name, conversion_category, action_optimization, status ORDER BY conversions DESC"
+    },
+    "campaign_status_change": {
+      "name": "Campaign Configuration Change Detection",
+      "lever": "Repairs",
+      "description": "One row per campaign per day with status, primary status and reasons, the previous day's values, and a changed flag.",
+      "query": "SELECT campaign_id, campaign_name, date, status, primary_status, primary_status_reasons, LAG(status) OVER w AS prev_status, LAG(primary_status) OVER w AS prev_primary_status, LAG(primary_status_reasons) OVER w AS prev_primary_status_reasons, (LAG(date) OVER w IS NOT NULL AND (status IS DISTINCT FROM LAG(status) OVER w OR primary_status IS DISTINCT FROM LAG(primary_status) OVER w OR primary_status_reasons IS DISTINCT FROM LAG(primary_status_reasons) OVER w)) AS changed FROM campaigns_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s WINDOW w AS (PARTITION BY campaign_id ORDER BY date) ORDER BY campaign_id, date"
+    },
+    "conversion_action_config_change": {
+      "name": "Conversion Action Configuration Change Detection",
+      "lever": "Repairs",
+      "description": "One row per conversion action per day with status, PRIMARY/SECONDARY, the previous day's values, and a changed flag.",
+      "query": "SELECT conversion_action_id, conversion_action_name, date, status, action_optimization, conversions, all_conversions, LAG(status) OVER w AS prev_status, LAG(action_optimization) OVER w AS prev_action_optimization, (LAG(date) OVER w IS NOT NULL AND (status IS DISTINCT FROM LAG(status) OVER w OR action_optimization IS DISTINCT FROM LAG(action_optimization) OVER w)) AS changed FROM conversions WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s WINDOW w AS (PARTITION BY conversion_action_id ORDER BY date) ORDER BY conversion_action_id, date"
+    },
+    "campaign_budget_bidding_efficiency": {
+      "name": "Campaign Budget & Bidding Efficiency Assessment",
+      "lever": "Budget & Bidding",
+      "description": "One row per campaign: cost, conversions, CPA, ROAS, CPC, CVR, period budget utilisation, latest budget and bidding configuration, and actual CPA minus target CPA.",
+      "query": "SELECT campaign_id, campaign_name, SUM(cost) AS cost, SUM(clicks) AS clicks, SUM(conversions) AS conversions, SUM(conversion_value) AS conversion_value, SUM(cost) / NULLIF(SUM(conversions), 0) AS cpa, SUM(conversion_value) / NULLIF(SUM(cost), 0) AS roas, SUM(cost) / NULLIF(SUM(clicks), 0) AS cpc, SUM(conversions) / NULLIF(SUM(clicks), 0) AS cvr, SUM(cost) / NULLIF(SUM(budget_amount), 0) AS budget_utilisation, (ARRAY_AGG(budget_amount ORDER BY date DESC))[1] AS latest_budget_amount, (ARRAY_AGG(budget_period ORDER BY date DESC))[1] AS latest_budget_period, (ARRAY_AGG(bidding_strategy_type ORDER BY date DESC))[1] AS latest_bidding_strategy_type, (ARRAY_AGG(target_cpa ORDER BY date DESC))[1] AS latest_target_cpa, (ARRAY_AGG(target_roas ORDER BY date DESC))[1] AS latest_target_roas, SUM(cost) / NULLIF(SUM(conversions), 0) - (ARRAY_AGG(target_cpa ORDER BY date DESC))[1] AS cpa_vs_target FROM campaigns_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s GROUP BY campaign_id, campaign_name ORDER BY cost DESC"
+    },
+    "campaign_spend_efficiency_trend": {
+      "name": "Spend & Efficiency Trend Analysis",
+      "lever": "Budget & Bidding",
+      "description": "One row per campaign per day: cost, clicks, impressions, conversions, budget, budget utilisation, CPC, CPA and ROAS.",
+      "query": "SELECT campaign_id, campaign_name, date, cost, clicks, impressions, conversions, conversion_value, budget_amount, budget_utilisation, cost / NULLIF(clicks, 0) AS cpc, cost / NULLIF(conversions, 0) AS cpa, conversion_value / NULLIF(cost, 0) AS roas FROM campaigns_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s ORDER BY campaign_id, date"
+    },
+    "campaign_budget_bidding_change": {
+      "name": "Budget & Bidding Configuration Change Detection",
+      "lever": "Budget & Bidding",
+      "description": "One row per campaign per day with budget and bidding configuration, the previous day's key values, and a changed flag.",
+      "query": "SELECT campaign_id, campaign_name, date, budget_id, budget_amount, budget_period, is_budget_shared, bidding_strategy_type, target_cpa, target_roas, LAG(budget_amount) OVER w AS prev_budget_amount, LAG(bidding_strategy_type) OVER w AS prev_bidding_strategy_type, LAG(target_cpa) OVER w AS prev_target_cpa, LAG(target_roas) OVER w AS prev_target_roas, (LAG(date) OVER w IS NOT NULL AND (budget_id IS DISTINCT FROM LAG(budget_id) OVER w OR budget_amount IS DISTINCT FROM LAG(budget_amount) OVER w OR budget_period IS DISTINCT FROM LAG(budget_period) OVER w OR is_budget_shared IS DISTINCT FROM LAG(is_budget_shared) OVER w OR bidding_strategy_type IS DISTINCT FROM LAG(bidding_strategy_type) OVER w OR target_cpa IS DISTINCT FROM LAG(target_cpa) OVER w OR target_roas IS DISTINCT FROM LAG(target_roas) OVER w)) AS changed FROM campaigns_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s WINDOW w AS (PARTITION BY campaign_id ORDER BY date) ORDER BY campaign_id, date"
+    },
+    "campaign_budget_concentration": {
+      "name": "Budget Cannibalisation Analysis",
+      "lever": "Budget & Bidding",
+      "description": "One row per campaign: latest budget, shared budget flag and reference count, cost, conversions, share of account spend vs share of account conversions, CPA and ROAS.",
+      "query": "SELECT campaign_id, campaign_name, (ARRAY_AGG(budget_id ORDER BY date DESC))[1] AS budget_id, (ARRAY_AGG(budget_amount ORDER BY date DESC))[1] AS budget_amount, (ARRAY_AGG(is_budget_shared ORDER BY date DESC))[1] AS is_budget_shared, (ARRAY_AGG(budget_reference_count ORDER BY date DESC))[1] AS budget_reference_count, SUM(cost) AS cost, SUM(conversions) AS conversions, SUM(conversion_value) AS conversion_value, SUM(cost) / NULLIF(SUM(SUM(cost)) OVER (), 0) AS share_of_spend, SUM(conversions) / NULLIF(SUM(SUM(conversions)) OVER (), 0) AS share_of_conversions, SUM(cost) / NULLIF(SUM(conversions), 0) AS cpa, SUM(conversion_value) / NULLIF(SUM(cost), 0) AS roas FROM campaigns_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s GROUP BY campaign_id, campaign_name ORDER BY cost DESC"
+    },
+    "campaign_visibility_engagement": {
+      "name": "Campaign Targeting & Creative Assessment",
+      "lever": "Targeting & Creative",
+      "description": "One row per campaign: impressions, clicks, CTR, period impression share, share lost to budget and to rank (weighted by eligible impressions), and average top and absolute-top impression share.",
+      "query": "SELECT campaign_id, campaign_name, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(clicks)::numeric / NULLIF(SUM(impressions), 0) AS ctr, SUM(impressions) FILTER (WHERE search_impression_share > 0) / NULLIF(SUM(impressions / NULLIF(search_impression_share, 0)), 0) AS search_impression_share, SUM(search_budget_lost_is * impressions / NULLIF(search_impression_share, 0)) / NULLIF(SUM(impressions / NULLIF(search_impression_share, 0)), 0) AS search_budget_lost_is, SUM(search_rank_lost_is * impressions / NULLIF(search_impression_share, 0)) / NULLIF(SUM(impressions / NULLIF(search_impression_share, 0)), 0) AS search_rank_lost_is, AVG(search_top_is) AS avg_search_top_is, AVG(search_abs_top_is) AS avg_search_abs_top_is FROM campaigns_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s GROUP BY campaign_id, campaign_name ORDER BY impressions DESC"
+    }
+  },
+  "ad_group": {
+    "ad_group_conversion_activity": {
+      "name": "Ad Group Conversion Activity Investigation",
+      "lever": "Measurement",
+      "description": "One row per ad group per day: impressions, clicks, cost, conversions, all_conversions, secondary gap, a clicks-without-conversions flag, impression share and rank-lost share.",
+      "query": "SELECT campaign_id, campaign_name, ad_group_id, ad_group_name, date, impressions, clicks, cost, conversions, all_conversions, all_conversions - conversions AS secondary_gap, (clicks > 0 AND conversions = 0) AS clicks_without_conversions, search_impression_share, search_rank_lost_is FROM ad_groups_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s ORDER BY campaign_id, ad_group_id, date"
+    },
+    "ad_group_status_change": {
+      "name": "Ad Group Delivery Status Change Detection",
+      "lever": "Repairs",
+      "description": "One row per ad group per day with status, primary status and reasons, the previous day's values, and a changed flag.",
+      "query": "SELECT campaign_id, campaign_name, ad_group_id, ad_group_name, date, status, primary_status, primary_status_reasons, LAG(status) OVER w AS prev_status, LAG(primary_status) OVER w AS prev_primary_status, LAG(primary_status_reasons) OVER w AS prev_primary_status_reasons, (LAG(date) OVER w IS NOT NULL AND (status IS DISTINCT FROM LAG(status) OVER w OR primary_status IS DISTINCT FROM LAG(primary_status) OVER w OR primary_status_reasons IS DISTINCT FROM LAG(primary_status_reasons) OVER w)) AS changed FROM ad_groups_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s WINDOW w AS (PARTITION BY ad_group_id ORDER BY date) ORDER BY campaign_id, ad_group_id, date"
+    },
+    "ad_group_budget_bidding_trend": {
+      "name": "Ad Group Budget & Bidding Trend Analysis",
+      "lever": "Budget & Bidding",
+      "description": "One row per ad group per day: performance, CPA, ROAS, CTR, CPC, CVR, impression share, bidding configuration and effective targets, with a flag when bidding configuration changed.",
+      "query": "SELECT campaign_id, campaign_name, ad_group_id, ad_group_name, date, cost, clicks, impressions, conversions, conversion_value, cost / NULLIF(conversions, 0) AS cpa, conversion_value / NULLIF(cost, 0) AS roas, clicks::numeric / NULLIF(impressions, 0) AS ctr, cost / NULLIF(clicks, 0) AS cpc, conversions / NULLIF(clicks, 0) AS cvr, search_impression_share, search_rank_lost_is, cpc_bid, target_cpa, target_roas, effective_target_cpa, effective_target_cpa_source, effective_target_roas, effective_target_roas_source, optimized_targeting_enabled, (LAG(date) OVER w IS NOT NULL AND (cpc_bid IS DISTINCT FROM LAG(cpc_bid) OVER w OR effective_target_cpa IS DISTINCT FROM LAG(effective_target_cpa) OVER w OR effective_target_roas IS DISTINCT FROM LAG(effective_target_roas) OVER w OR optimized_targeting_enabled IS DISTINCT FROM LAG(optimized_targeting_enabled) OVER w)) AS bidding_config_changed FROM ad_groups_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s WINDOW w AS (PARTITION BY ad_group_id ORDER BY date) ORDER BY campaign_id, ad_group_id, date"
+    },
+    "ad_group_spend_allocation": {
+      "name": "Ad Group Spend Allocation & Efficiency Profile",
+      "lever": "Budget & Bidding",
+      "description": "One row per ad group: totals, CPA, ROAS, CTR, CPC, CVR, share of its campaign's spend vs share of its campaign's conversions, and latest bidding configuration.",
+      "query": "SELECT campaign_id, campaign_name, ad_group_id, ad_group_name, SUM(cost) AS cost, SUM(clicks) AS clicks, SUM(impressions) AS impressions, SUM(conversions) AS conversions, SUM(conversion_value) AS conversion_value, SUM(cost) / NULLIF(SUM(conversions), 0) AS cpa, SUM(conversion_value) / NULLIF(SUM(cost), 0) AS roas, SUM(clicks)::numeric / NULLIF(SUM(impressions), 0) AS ctr, SUM(cost) / NULLIF(SUM(clicks), 0) AS cpc, SUM(conversions) / NULLIF(SUM(clicks), 0) AS cvr, SUM(cost) / NULLIF(SUM(SUM(cost)) OVER (PARTITION BY campaign_id), 0) AS share_of_campaign_spend, SUM(conversions) / NULLIF(SUM(SUM(conversions)) OVER (PARTITION BY campaign_id), 0) AS share_of_campaign_conversions, (ARRAY_AGG(cpc_bid ORDER BY date DESC))[1] AS latest_cpc_bid, (ARRAY_AGG(effective_target_cpa ORDER BY date DESC))[1] AS latest_effective_target_cpa, (ARRAY_AGG(effective_target_cpa_source ORDER BY date DESC))[1] AS latest_effective_target_cpa_source, (ARRAY_AGG(effective_target_roas ORDER BY date DESC))[1] AS latest_effective_target_roas, (ARRAY_AGG(effective_target_roas_source ORDER BY date DESC))[1] AS latest_effective_target_roas_source, (ARRAY_AGG(optimized_targeting_enabled ORDER BY date DESC))[1] AS latest_optimized_targeting_enabled FROM ad_groups_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s GROUP BY campaign_id, campaign_name, ad_group_id, ad_group_name ORDER BY campaign_id, cost DESC"
+    },
+    "ad_group_excess_spend": {
+      "name": "Ad Group Excess Spend (Zoom)",
+      "lever": "Budget & Bidding",
+      "description": "One row per ad group comparing the selected period with the previous equal period. excess_spend = cost now minus conversions now times CPA before (falls back to the campaign's CPA before). Highest excess spend is the most likely culprit.",
+      "query": "WITH p AS (SELECT %(start_date)s::date AS s, %(end_date)s::date AS e), w AS (SELECT s, e, s - (e - s + 1) AS ps FROM p), g AS (SELECT a.campaign_id, a.campaign_name, a.ad_group_id, a.ad_group_name, SUM(a.cost) FILTER (WHERE a.date >= w.s) AS cost_now, SUM(a.cost) FILTER (WHERE a.date < w.s) AS cost_before, SUM(a.clicks) FILTER (WHERE a.date >= w.s) AS clicks_now, SUM(a.clicks) FILTER (WHERE a.date < w.s) AS clicks_before, SUM(a.conversions) FILTER (WHERE a.date >= w.s) AS conversions_now, SUM(a.conversions) FILTER (WHERE a.date < w.s) AS conversions_before FROM ad_groups_daily a CROSS JOIN w WHERE a.client_id = %(client_id)s AND a.date BETWEEN w.ps AND w.e GROUP BY a.campaign_id, a.campaign_name, a.ad_group_id, a.ad_group_name) SELECT campaign_id, campaign_name, ad_group_id, ad_group_name, cost_now, cost_before, clicks_now, clicks_before, conversions_now, conversions_before, cost_now / NULLIF(clicks_now, 0) AS cpc_now, cost_before / NULLIF(clicks_before, 0) AS cpc_before, cost_now / NULLIF(conversions_now, 0) AS cpa_now, COALESCE(cost_before / NULLIF(conversions_before, 0), SUM(cost_before) OVER (PARTITION BY campaign_id) / NULLIF(SUM(conversions_before) OVER (PARTITION BY campaign_id), 0)) AS cpa_before_used, COALESCE(cost_now, 0) - COALESCE(conversions_now, 0) * COALESCE(cost_before / NULLIF(conversions_before, 0), SUM(cost_before) OVER (PARTITION BY campaign_id) / NULLIF(SUM(conversions_before) OVER (PARTITION BY campaign_id), 0)) AS excess_spend FROM g ORDER BY excess_spend DESC NULLS LAST"
+    },
+    "ad_group_targeting_effectiveness": {
+      "name": "Ad Group Targeting Effectiveness Assessment",
+      "lever": "Targeting",
+      "description": "One row per ad group: impressions, clicks, CTR, cost, conversions, all_conversions, CVR, period impression share and rank-lost share (weighted by eligible impressions).",
+      "query": "SELECT campaign_id, campaign_name, ad_group_id, ad_group_name, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(clicks)::numeric / NULLIF(SUM(impressions), 0) AS ctr, SUM(cost) AS cost, SUM(conversions) AS conversions, SUM(all_conversions) AS all_conversions, SUM(conversions) / NULLIF(SUM(clicks), 0) AS cvr, SUM(impressions) FILTER (WHERE search_impression_share > 0) / NULLIF(SUM(impressions / NULLIF(search_impression_share, 0)), 0) AS search_impression_share, SUM(search_rank_lost_is * impressions / NULLIF(search_impression_share, 0)) / NULLIF(SUM(impressions / NULLIF(search_impression_share, 0)), 0) AS search_rank_lost_is FROM ad_groups_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s GROUP BY campaign_id, campaign_name, ad_group_id, ad_group_name ORDER BY campaign_id, impressions DESC"
+    },
+    "ad_group_creative_effectiveness": {
+      "name": "Ad Group Creative Effectiveness Assessment",
+      "lever": "Creative",
+      "description": "One row per ad group: impressions, clicks, CTR next to its campaign's CTR, cost, conversions, all_conversions and CVR.",
+      "query": "SELECT campaign_id, campaign_name, ad_group_id, ad_group_name, SUM(impressions) AS impressions, SUM(clicks) AS clicks, SUM(clicks)::numeric / NULLIF(SUM(impressions), 0) AS ctr, (SUM(SUM(clicks)) OVER (PARTITION BY campaign_id))::numeric / NULLIF(SUM(SUM(impressions)) OVER (PARTITION BY campaign_id), 0) AS campaign_ctr, SUM(cost) AS cost, SUM(conversions) AS conversions, SUM(all_conversions) AS all_conversions, SUM(conversions) / NULLIF(SUM(clicks), 0) AS cvr FROM ad_groups_daily WHERE client_id = %(client_id)s AND date BETWEEN %(start_date)s AND %(end_date)s GROUP BY campaign_id, campaign_name, ad_group_id, ad_group_name ORDER BY campaign_id, impressions DESC"
+    }
+  }
+}

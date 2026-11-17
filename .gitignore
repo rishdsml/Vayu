@@ -1,0 +1,20 @@
+# Python
+.genv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/tsconfig.tsbuildinfo
+
+# Alembic
+migrations/__pycache__/
+
+# Mac
+.DS_Store
+
+# VS Code
+.vscode/
